@@ -14,12 +14,13 @@ local M = {
   checked_buffers = {},
 }
 local function now() return vim.uv.now() end
-
 function M.start()
   for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
     if vim.api.nvim_buf_is_loaded(bufnr) then
       local ft = vim.bo[bufnr].filetype
-      if ft == "cs" or ft == "razor" then vim.api.nvim_exec_autocmds("FileType", { buffer = bufnr }) end
+      if ft == "cs" or ft == "razor" then vim.api.nvim_exec_autocmds("FileType", {
+		buffer = bufnr
+	  }) end
     end
   end
 end
@@ -528,6 +529,7 @@ function M.enable(opts)
         if params.registrations then
           for _, registration in ipairs(params.registrations) do
             if registration.method == "workspace/didChangeWatchedFiles" and registration.registerOptions and registration.registerOptions.watchers then
+              -- Filter out watchers for non-existing paths
               registration.registerOptions.watchers = vim
                 .iter(registration.registerOptions.watchers)
                 :filter(function(watch)
@@ -551,6 +553,7 @@ function M.enable(opts)
       end,
       ["workspace/projectInitializationComplete"] = function(_, _, ctx, _)
         local client = vim.lsp.get_client_by_id(ctx.client_id)
+
         if not client then return end
         if M.solution_state[client.id] then M.solution_state[client.id].loaded_at = now() end
         local workspace_job = M.state[client.id]
