@@ -36,13 +36,13 @@ As a developer transitioning from Rider to Neovim, I found myself missing the si
    - [Keymaps](#keymaps)
    - [Debugging tests](#debugging-tests)
    - [Running tests from buffer](#running-tests-from-buffer)
-9. [Project view](#project-view)
-   - [Features](#features-1)
-   - [Keymaps](#keymaps-1)
+9. [Neotest](#neotest)
+   - [Requirements](#requirements-1)
+   - [Setup](#setup-1)
 10. [Workspace Diagnostics](#workspace-diagnostics)
     - [Commands](#commands-1)
     - [Configuration](#configuration)
-    - [Features](#features-2)
+    - [Features](#features-1)
 11. [Outdated](#outdated)
 12. [Add](#add)
     - [Add package](#add-package)
@@ -50,7 +50,7 @@ As a developer transitioning from Rider to Neovim, I found myself missing the si
     - [Add reference](#add-reference)
     - [Package autocomplete](#package-autocomplete)
 14. [.NET Framework](#net-framework)
-    - [Requirements](#requirements-1)
+    - [Requirements](#requirements-2)
 15. [New](#new)
     - [Project](#project)
     - [Configuration file](#configuration-file)
@@ -59,12 +59,12 @@ As a developer transitioning from Rider to Neovim, I found myself missing the si
     - [Integrating with mini files](#integrating-with-mini-files)
     - [Integrating with snacks explorer](#integrating-with-snacks-explorer)
 16. [EntityFramework](#entityframework)
-    - [Requirements](#requirements-2)
+    - [Requirements](#requirements-3)
     - [Database](#database)
     - [Migrations](#migrations)
 17. [Language injections](#language-injections)
     - [Showcase](#showcase)
-    - [Requirements](#requirements-3)
+    - [Requirements](#requirements-4)
     - [Support matrix](#support-matrix)
 18. [Nvim-dap configuration](#nvim-dap-configuration)
 19. [Troubleshooting](#troubleshooting)
@@ -102,10 +102,6 @@ Although not *required* by the plugin, it is highly recommended to install one o
 
 ## Setup
 
-
->[!IMPORTANT]
->Remember to also setup the cmp source for autocomplete
-
 ### Without options
 ```lua
 -- lazy.nvim
@@ -133,9 +129,19 @@ Although not *required* by the plugin, it is highly recommended to install one o
      managed_terminal = {
        auto_hide = true, -- auto hides terminal if exit code is 0
        auto_hide_delay = 1000, -- delay before auto hiding, 0 = instant
+       mappings = {
+         next_tab       = { lhs = "<Tab>",   desc = "Next terminal tab" },
+         prev_tab       = { lhs = "<S-Tab>", desc = "Previous terminal tab" },
+         new_terminal   = { lhs = "+",       desc = "New user terminal" },
+         close_terminal = { lhs = "X",       desc = "Close current terminal tab" },
+         hide_panel     = { lhs = "q",       desc = "Hide terminal panel" },
+       },
      },
       -- Optional configuration for external terminals (matches nvim-dap structure)
       external_terminal = nil,
+      projx_lsp = {
+        enabled = true,
+      },
       lsp = {
         enabled = true, -- Enable builtin roslyn lsp
         set_fold_expr = false,
@@ -161,6 +167,8 @@ Although not *required* by the plugin, it is highly recommended to install one o
       test_runner = {
         auto_start_testrunner = true,
         hide_legend = false,
+        -- Set to true when using neotest to avoid duplicate signs and conflicting buffer keymaps. 
+        neotest_integration = false,
         ---@type "split" | "vsplit" | "float" | "buf"
         viewmode = "float",
         ---@type number|nil
@@ -226,7 +234,6 @@ Although not *required* by the plugin, it is highly recommended to install one o
       -- the available one automatically with this priority:
       --  snacks -> fzf -> telescope ->  basic
       picker = "snacks",
-      background_scanning = true,
       notifications = {
         --Set this to false if you have configured lualine to avoid double logging
         handler = function(start_event)
@@ -241,6 +248,12 @@ Although not *required* by the plugin, it is highly recommended to install one o
       diagnostics = {
         default_severity = "error",
         setqflist = false,
+      },
+      outdated = {
+        mappings = {
+          upgrade = { lhs = "<leader>pu", desc = "upgrade package under cursor" },
+          upgrade_all = { lhs = "<leader>pa", desc = "upgrade all outdated packages" },
+        },
       },
     })
 
@@ -258,14 +271,47 @@ Although not *required* by the plugin, it is highly recommended to install one o
 ```
 
 ### Lualine config
+
+#### Simple components
+
 ```lua
-local job_indicator = { require("easy-dotnet.ui-modules.jobs").lualine }
+local dotnet = require("easy-dotnet")
 
 require("lualine").setup {
   sections = {
     -- ...
-    lualine_a = { "mode", job_indicator },
+    lualine_a = { "mode", dotnet.lualine.jobs },
+    -- Shows the default startup project and its launch profile (if any),
+    -- pushed by the server whenever it changes.
+    lualine_x = { dotnet.lualine.active_project },
     -- ...
+  },
+}
+```
+
+#### Dynamic run/stop component
+
+A single component that adapts to running state:
+
+- **Idle:** ` ProjectName` — left-click runs, right-click debugs
+- **Running:** ` ProjectName` (green) — process alive, no debugger attached
+- **Debugging:** ` ProjectName` (orange) — debugger attached
+
+Uses three [Codicons](https://www.nerdfonts.com/) (requires Nerd Font): `nf-cod-debug_start`, `nf-cod-debug_stop`, `nf-cod-debug`.
+
+```lua
+local dotnet = require("easy-dotnet")
+
+require("lualine").setup {
+  sections = {
+    lualine_x = {
+      dotnet.lualine.jobs,
+      {
+        dotnet.lualine.run_status,
+        color    = dotnet.lualine.run_status_color,
+        on_click = dotnet.lualine.run_status_click,
+      },
+    },
   },
 }
 ```
@@ -299,10 +345,6 @@ require("lualine").setup {
 | `dotnet.build_quickfix()` | `dotnet build <TS> <DArgs>` and opens build errors in the quickfix list |
 | `dotnet.build_default()` | `dotnet build <TS Default> <DArgs>` |
 | `dotnet.build_default_quickfix()` | `dotnet build <TS Default> <DArgs>` and opens build errors in the quickfix list |
-||
-| `dotnet.project_view()` | Opens the project view |
-| `dotnet.project_view_default()` | Opens the project view for your default project |
-||
 | `dotnet.pack()` | `dotnet pack -c release` |
 | `dotnet.push()` | `dotnet pack and push` |
 ||
@@ -314,7 +356,7 @@ require("lualine").setup {
 | `dotnet.watch_default()` | `dotnet watch --project <TS Default> <DArgs>` |
 ||
 | `dotnet.restore()` | `dotnet restore <sln> <Dargs>` |
-| `dotnet.clean()`                              | `dotnet clean <sln> <DArgs>`                                                                          |
+| `dotnet.clean()`                              | `dotnet clean <pick target>`                                                                           |
 ||
 | `dotnet.remove_package()`                              | |
 | `dotnet.add_package()`                              | |
@@ -383,8 +425,6 @@ dotnet.build_solution_quickfix()
 dotnet.build_quickfix()                 
 dotnet.build_default()                 
 dotnet.build_default_quickfix()       
-dotnet.project_view()
-dotnet.project_view_default()
 dotnet.pack()                           
 dotnet.push()                           
 dotnet.run()
@@ -436,8 +476,6 @@ Dotnet build default quickfix
 Dotnet add package
 Dotnet add package prerelease
 Dotnet remove package
-Dotnet project view
-Dotnet project view default
 Dotnet pack
 Dotnet push
 Dotnet ef database update
@@ -455,6 +493,9 @@ Dotnet solution select <path>
 Dotnet solution add
 Dotnet solution remove
 Dotnet outdated
+Dotnet terminal toggle
+Dotnet terminal show
+Dotnet terminal hide
 Dotnet diagnostic
 Dotnet diagnostic errors
 Dotnet diagnostic warnings
@@ -462,7 +503,6 @@ checkhealth easy-dotnet
 
 -- Internal 
 Dotnet reset -- Deletes all persisted files
-Dotnet _cached_files -- Preview picker for persisted files
 Dotnet _server restart
 Dotnet _server update
 Dotnet _server stop
@@ -543,33 +583,70 @@ When a run is triggered from the buffer the method or class flashes to confirm i
 <img width="1228" height="578" alt="test flash confirm" src="https://github.com/user-attachments/assets/bcb8377a-577f-4808-a20e-1c90f884d9d4" />
 <img width="1885" height="1044" alt="floating stacktrace from buffer" src="https://github.com/user-attachments/assets/109fdfdd-d93b-400e-a4e0-8ebf41ff9312" />
 
-## Project view
+## Neotest
 
-Get a comprehensive overview of a project's dependencies, and easily manage NuGet packages and project references.
+easy-dotnet ships a built-in [neotest](https://github.com/nvim-neotest/neotest) adapter. It reuses the same test runner state that powers the built-in test runner window, so no extra discovery step is needed.
 
-![image](https://github.com/user-attachments/assets/2e0e2e25-0a2b-4864-bc3b-64b4048967e5)
+### Requirements
 
-### Features
-- **Project Details**: View project name, solution, language, and target version.
-- **Project References**:
-  - View project references.
-  - Add or remove project references.
-- **NuGet Packages**:
-  - View package references.
-  - Add or remove NuGet package references.
+- [nvim-neotest/neotest](https://github.com/nvim-neotest/neotest)
 
-### Keymaps
+### Setup
 
-Keymaps are region-specific and work based on context (e.g., when hovering over a project/package or its header):
+**1. Enable `neotest_integration` in easy-dotnet**
 
-#### Project References:
-- `a`: Add project reference.
-- `r`: Remove project reference.
+This disables the built-in buffer signs and keymaps so neotest can manage them instead:
 
-#### Package References:
-- `a`: Add package reference.
-- `r`: Remove package reference.
-- `<C-b>`: View package in browser.
+```lua
+require("easy-dotnet").setup({
+  test_runner = {
+    neotest_integration = true,
+  },
+})
+```
+
+**2. Register the adapter with neotest**
+
+```lua
+require("neotest").setup({
+  adapters = {
+    require("easy-dotnet.neotest"),
+  },
+})
+```
+
+#### lazy.nvim example
+
+```lua
+{
+  "nvim-neotest/neotest",
+  dependencies = {
+    "nvim-lua/nvim-nio",
+    "nvim-lua/plenary.nvim",
+    "antoinemadec/FixCursorHold.nvim",
+    "nvim-treesitter/nvim-treesitter",
+    "GustavEikaas/easy-dotnet.nvim",
+  },
+  config = function()
+    require("neotest").setup({
+      adapters = {
+        require("easy-dotnet.neotest"),
+      },
+    })
+  end,
+},
+-- Make sure easy-dotnet is configured with neotest_integration = true
+{
+  "GustavEikaas/easy-dotnet.nvim",
+  config = function()
+    require("easy-dotnet").setup({
+      test_runner = {
+        neotest_integration = true,
+      },
+    })
+  end,
+}
+```
 
 ## Workspace Diagnostics
 
@@ -617,6 +694,15 @@ Supports the following filetypes
 - Packages.props
 - Directory.Build.props
 
+After running `Dotnet outdated`, buffer-local keymaps are registered to upgrade packages in place
+(replaces the `Version="..."` attribute with the latest version and removes the virtual text).
+Both keymaps are configurable via `outdated.mappings`:
+
+| Default     | Action                                       |
+| ----------- | -------------------------------------------- |
+| `<leader>pu` | Upgrade the outdated package under the cursor |
+| `<leader>pa` | Upgrade all outdated packages in the buffer   |
+
 
 ![image](https://github.com/user-attachments/assets/496caec1-a18b-487a-8a37-07c4bb9fa113)
 
@@ -640,46 +726,10 @@ Key mappings are available automatically within `.csproj` and `.fsproj` files
 
 ### Package autocomplete
 
-When editing package references inside a .csproject file it is possible to enable autocomplete.
-This will trigger autocomplete for `<PackageReference Include="<cmp-trigger>" Version="<cmp-trigger>" />`
+Package autocomplete in `.csproj` files is provided by the ProjX LSP, which is enabled by default.
+This triggers autocomplete for `<PackageReference Include="<lsp-trigger>" Version="<lsp-trigger>" />`.
 
-#### Using nvim-cmp
-
-```lua
-    cmp.register_source("easy-dotnet", require("easy-dotnet").package_completion_source)
-    ...
-    sources = cmp.config.sources({
-        { name = 'nvim_lsp'    },
-        { name = 'easy-dotnet' },
-        ...
-    }),
-    ...
-```
-
-#### Using Blink.cmp
-```lua
-return {
-  "saghen/blink.cmp",
-  version = "*",
-  config = function()
-    require("blink.cmp").setup {
-      fuzzy = { implementation = "prefer_rust_with_warning" },
-      sources = {
-        default = { "lsp", "easy-dotnet", "path" },
-        providers = {
-          ["easy-dotnet"] = {
-            name = "easy-dotnet",
-            enabled = true,
-            module = "easy-dotnet.completion.blink",
-            score_offset = 10000,
-            async = true,
-          },
-        },
-      },
-    }
-  end,
-}
-```
+Older configurations that manually register the `easy-dotnet` source with `nvim-cmp` or `blink.cmp` should be removed.
 
 ![image](https://github.com/user-attachments/assets/81809aa8-704b-4481-9445-3985ddef6c98)
 
@@ -908,6 +958,7 @@ Check out [debugging-setup](./docs/debugging.md) for a full walkthrough of debug
 | **EasyDotnetTestRunnerPassed** | *DiagnosticOk* |
 | **EasyDotnetTestRunnerFailed** | *DiagnosticError* |
 | **EasyDotnetTestRunnerRunning** | *DiagnosticWarn* |
+| **EasyDotnetTestRunnerQueued** | *Comment* |
 | **EasyDotnetDebuggerFloatVariable** | *Question* |
 | **EasyDotnetDebuggerVirtualVariable** | *Question* |
 | **EasyDotnetDebuggerVirtualException** | *DiagnosticError* |

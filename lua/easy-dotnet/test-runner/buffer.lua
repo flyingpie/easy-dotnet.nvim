@@ -7,6 +7,11 @@ local ns_signs = vim.api.nvim_create_namespace("easy_dotnet_test_signs")
 local extmark_ids = {}
 local registered_bufs = {}
 
+local function neotest_integration()
+  local ok, opts = pcall(require, "easy-dotnet.options")
+  return ok and opts.get_option("test_runner").neotest_integration == true
+end
+
 local function norm(path)
   if not path then return nil end
   return vim.fs.normalize(path)
@@ -46,7 +51,7 @@ local function nodes_for_file(filepath)
     if
       norm(node.filePath) == npath
       and node.type
-      and (node.type.type == "TestMethod" or node.type.type == "Subcase" or node.type.type == "TheoryGroup" or node.type.type == "TestClass")
+      and (node.type.type == "TestMethod" or node.type.type == "Subcase" or node.type.type == "TheoryGroup" or node.type.type == "TestClass" or node.type.type == "ProbableTest")
       and node.signatureLine ~= nil
     then
       table.insert(result, node)
@@ -77,7 +82,7 @@ local function group_nodes_by_line(filepath)
 end
 
 local function aggregate_status(nodes)
-  local order = { Running = 4, Debugging = 4, Failed = 3, Skipped = 2, Passed = 1 }
+  local order = { Running = 4, Debugging = 4, Failed = 3, Inconclusive = 2, Skipped = 2, Passed = 1 }
   local best = nil
   local best_rank = 0
   for _, node in ipairs(nodes) do
@@ -131,21 +136,37 @@ end
 local sign_text_for = {
   Passed = function(icons) return (icons.passed or "") .. " " end,
   Failed = function(icons) return (icons.failed or "") .. " " end,
+  Inconclusive = function(icons) return (icons.inconclusive or icons.skipped or "") .. " " end,
   Skipped = function(icons) return (icons.skipped or "") .. " " end,
   Running = function(icons) return (icons.reload or "") .. " " end,
   Debugging = function(icons) return (icons.reload or "") .. " " end,
+  ProbableTest = function(icons) return (icons.test or "󰙨") .. " " end,
 }
 local sign_hl_for = {
   Passed = "EasyDotnetTestRunnerPassed",
   Failed = "EasyDotnetTestRunnerFailed",
+  Inconclusive = "EasyDotnetTestRunnerInconclusive",
   Skipped = "EasyDotnetTestRunnerSkipped",
   Running = "EasyDotnetTestRunnerRunning",
   Debugging = "EasyDotnetTestRunnerRunning",
+  ProbableTest = "EasyDotnetTestRunnerProbable",
 }
 
 local function resolve_sign(nodes)
   local icons = get_icons()
   local stype = aggregate_status(nodes)
+  -- If no status is set and the group is entirely probable nodes, use the
+  -- ProbableTest sign so they render with a distinct dim highlight.
+  if not stype then
+    local all_probable = true
+    for _, n in ipairs(nodes) do
+      if not (n.type and n.type.type == "ProbableTest") then
+        all_probable = false
+        break
+      end
+    end
+    if all_probable then stype = "ProbableTest" end
+  end
   local text = stype and sign_text_for[stype] and sign_text_for[stype](icons) or (icons.test or "󰙨") .. " "
   local hl = sign_hl_for[stype] or "EasyDotnetTestRunnerTest"
   return text, hl
@@ -167,6 +188,7 @@ local function apply_sign_for_group(bufnr, sig_line, group, filepath)
 end
 
 function M.apply_signs(filepath)
+  if neotest_integration() then return end
   local bufnr = vim.fn.bufnr(filepath)
   if bufnr == -1 or not vim.api.nvim_buf_is_valid(bufnr) then return end
 
@@ -284,30 +306,34 @@ function M.attach(filepath, client)
 
   local bufnr = vim.fn.bufnr(filepath)
   if bufnr ~= -1 and vim.api.nvim_buf_is_valid(bufnr) then
-    M.apply_signs(filepath)
-    if not registered_bufs[bufnr] then
-      M.register_buf_keymaps(bufnr, client)
-      registered_bufs[bufnr] = true
+    if not neotest_integration() then
+      M.apply_signs(filepath)
+      if not registered_bufs[bufnr] then
+        M.register_buf_keymaps(bufnr, client)
+        registered_bufs[bufnr] = true
+      end
     end
   end
 
   if not registered_bufs[filepath] then
     registered_bufs[filepath] = true
 
-    vim.api.nvim_create_autocmd("BufReadPost", {
-      pattern = filepath,
-      callback = function(ev)
-        vim.schedule(function()
-          pcall(function()
-            M.apply_signs(filepath)
-            if not registered_bufs[ev.buf] then
-              M.register_buf_keymaps(ev.buf, client)
-              registered_bufs[ev.buf] = true
-            end
+    if not neotest_integration() then
+      vim.api.nvim_create_autocmd("BufReadPost", {
+        pattern = filepath,
+        callback = function(ev)
+          vim.schedule(function()
+            pcall(function()
+              M.apply_signs(filepath)
+              if not registered_bufs[ev.buf] then
+                M.register_buf_keymaps(ev.buf, client)
+                registered_bufs[ev.buf] = true
+              end
+            end)
           end)
-        end)
-      end,
-    })
+        end,
+      })
+    end
 
     local version = 0
 
@@ -331,7 +357,7 @@ function M.attach(filepath, client)
           end
 
           state.traverse_all(function(node)
-            if norm(node.filePath) == norm(filepath) and not live_ids[node.id] then state.remove(node.id) end
+            if norm(node.filePath) == norm(filepath) and not live_ids[node.id] and not (node.type and node.type.type == "ProbableTest") then state.remove(node.id) end
           end)
 
           M.apply_signs(filepath)
@@ -342,6 +368,7 @@ function M.attach(filepath, client)
 end
 
 function M.on_status_update(node)
+  if neotest_integration() then return end
   vim.schedule(function()
     M.update_sign(node)
     local stype = node.status and node.status.type or nil
@@ -360,6 +387,7 @@ end
 
 --- @param project_id string|nil
 function M.refresh_signs(project_id)
+  if neotest_integration() then return end
   local candidates = {}
 
   for filepath in pairs(extmark_ids) do

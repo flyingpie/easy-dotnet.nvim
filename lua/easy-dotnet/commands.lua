@@ -28,13 +28,6 @@ local function passthrough_dotnet_cli_args_handler(arguments)
   return string.format("%s %s", loweredArgument, passthrough_dotnet_cli_args_handler(vim.list_slice(arguments, 2, #arguments)))
 end
 
----@param args string | string[] | nil
----@return string
-local function stringify_args(args)
-  ---@type string
-  return type(args) == "table" and table.concat(args, " ") or args or ""
-end
-
 local actions = require("easy-dotnet.actions")
 
 ---This entire object is exposed, any change to this will possibly be a breaking change, tread carefully
@@ -183,29 +176,6 @@ M.debug = {
   },
 }
 
-M._cached_files = {
-  handle = function()
-    local dir = require("easy-dotnet.constants").get_data_directory()
-    local pattern = dir .. [[/*.json]]
-    local files = vim.tbl_map(function(value) return { display = vim.fs.basename(value), name = value, path = value } end, vim.fn.glob(pattern, false, true))
-    local file_preview = function(self, entry)
-      local path = entry.value.path
-      local content = table.concat(vim.fn.readfile(path), "\n")
-
-      local ok, parsed = pcall(vim.json.decode, content)
-      if not ok then
-        vim.notify("Invalid JSON in: " .. path, vim.log.levels.ERROR)
-        return
-      end
-
-      local lines = vim.split(vim.inspect(parsed), "\n")
-      vim.api.nvim_buf_set_lines(self.state.bufnr, 0, -1, false, lines)
-    end
-
-    require("easy-dotnet.picker").preview_picker(nil, files, function(i) vim.cmd("edit " .. i.path) end, "", file_preview)
-  end,
-}
-
 M.watch = {
   handle = function(args, _)
     local client = require("easy-dotnet.rpc.rpc").global_rpc_client
@@ -237,19 +207,6 @@ M.watch = {
         )
       end,
       passthrough = true,
-    },
-  },
-}
-
-M.project = {
-  subcommands = {
-    view = {
-      handle = function() require("easy-dotnet.project-view").open_or_toggle() end,
-      subcommands = {
-        default = {
-          handle = function() require("easy-dotnet.project-view").open_or_toggle_default() end,
-        },
-      },
     },
   },
 }
@@ -288,9 +245,9 @@ M.remove = {
 }
 
 M.secrets = {
-  handle = function(_, options)
-    local secrets = require("easy-dotnet.secrets")
-    secrets.edit_secrets_picker(options.secrets.path)
+  handle = function(_, _)
+    local client = require("easy-dotnet.rpc.rpc").global_rpc_client
+    client:initialize(function() client.secrets:open() end)
   end,
 }
 
@@ -402,8 +359,11 @@ M.outdated = {
 }
 
 M.clean = {
-  handle = function(args) require("easy-dotnet.actions.clean").clean_solution(stringify_args(args)) end,
-  passthrough = true,
+  handle = function(_, _)
+    local client = require("easy-dotnet.rpc.rpc").global_rpc_client
+    client:initialize(function() client.workspace:clean() end)
+  end,
+  passthrough = false,
 }
 
 M.new = {
@@ -423,9 +383,17 @@ M.solution = {
   subcommands = {
     select = {
       handle = function(args)
-        local path = type(args) == "string" and args or args[1]
-        current_solution.set_solution(path)
-        logger.info(string.format("Selected solution: %s", vim.fs.basename(path)))
+        local path = type(args) == "string" and args or (type(args) == "table" and args[1] or nil)
+        if path then
+          current_solution.set_solution(path)
+          logger.info(string.format("Selected solution: %s", vim.fs.basename(path)))
+          return
+        end
+        current_solution.pick_solution(function(picked)
+          if not picked then return end
+          current_solution.set_solution(picked)
+          logger.info(string.format("Selected solution: %s", vim.fs.basename(picked)))
+        end)
       end,
       passthrough = true,
     },
@@ -490,7 +458,10 @@ M.ef = {
           end,
         },
         list = {
-          handle = function() require("easy-dotnet.ef-core.migration").list_migrations() end,
+          handle = function()
+            local client = require("easy-dotnet.rpc.rpc").global_rpc_client
+            client:initialize(function() client.entity_framework:migration_list() end)
+          end,
         },
       },
     },

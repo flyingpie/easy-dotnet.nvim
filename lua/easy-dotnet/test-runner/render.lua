@@ -24,6 +24,7 @@ local spinner = {
 
 local last_run_time = nil
 local was_loading = false
+local refresh_pending = false
 
 local action_display = {
   Run = "Run",
@@ -51,6 +52,7 @@ local function build_right_counts(rs)
   push(string.format("%s %d  ", ic.success, rs.totalPassed), "EasyDotnetTestRunnerPassed")
   push(string.format("%s %d  ", ic.failed, rs.totalFailed), "EasyDotnetTestRunnerFailed")
   push(string.format("%s %d  ", ic.skipped, rs.totalSkipped), "EasyDotnetTestRunnerSkipped")
+  if (rs.totalInconclusive or 0) > 0 then push(string.format("%s %d  ", ic.inconclusive or ic.skipped, rs.totalInconclusive), "EasyDotnetTestRunnerInconclusive") end
   push(string.format("%d tests", rs.totalTests or 0), "Comment")
 
   local text = table.concat(parts)
@@ -80,6 +82,8 @@ local function build_header_row(rs, frame)
         left_hl = "Comment"
       elseif shown == "Failed" then
         left_hl = "EasyDotnetTestRunnerFailed"
+      elseif shown == "Inconclusive" then
+        left_hl = "EasyDotnetTestRunnerInconclusive"
       else
         left_hl = "EasyDotnetTestRunnerPassed"
       end
@@ -88,7 +92,7 @@ local function build_header_row(rs, frame)
     if last_run_time then left_text = left_text .. "  " .. last_run_time end
   end
 
-  local empty_rs = { totalRunning = 0, totalPassed = 0, totalFailed = 0, totalSkipped = 0, totalTests = 0 }
+  local empty_rs = { totalRunning = 0, totalPassed = 0, totalFailed = 0, totalSkipped = 0, totalInconclusive = 0, totalTests = 0 }
   local right_text, right_hls, right_dw = build_right_counts(rs or empty_rs)
   local left_dw = vim.fn.strdisplaywidth(left_text)
 
@@ -348,10 +352,21 @@ local function close_aux_wins()
   M.footer_win = nil
 end
 
+local function disable_gutter(win)
+  vim.wo[win].number = false
+  vim.wo[win].relativenumber = false
+  vim.wo[win].signcolumn = "no"
+  vim.wo[win].foldcolumn = "0"
+  pcall(vim.api.nvim_set_option_value, "statuscolumn", "", { win = win })
+end
+
 ---@param mode "float"|"split"|"vsplit"
 function M.open(mode, options)
   M.options = options or M.options
   M.viewmode = mode
+
+  local term_mgr = require("easy-dotnet.terminal.manager")
+  if term_mgr.panel_win and vim.api.nvim_win_is_valid(term_mgr.panel_win) then require("easy-dotnet.terminal").hide() end
 
   if not M.buf or not vim.api.nvim_buf_is_valid(M.buf) then
     M.buf = make_scratch_buf("Test Runner")
@@ -374,6 +389,7 @@ function M.open(mode, options)
       border = "rounded",
       focusable = true,
     })
+    disable_gutter(M.win)
 
     vim.api.nvim_create_autocmd("WinClosed", {
       pattern = tostring(M.win),
@@ -395,6 +411,7 @@ function M.open(mode, options)
     end
     M.win = vim.api.nvim_get_current_win()
     vim.api.nvim_win_set_buf(M.win, M.buf)
+    disable_gutter(M.win)
 
     open_header_split()
     if not M.options.hide_legend then open_footer_split() end
@@ -447,6 +464,7 @@ end
 local status_highlights = {
   Passed = "EasyDotnetTestRunnerPassed",
   Failed = "EasyDotnetTestRunnerFailed",
+  Inconclusive = "EasyDotnetTestRunnerInconclusive",
   Skipped = "EasyDotnetTestRunnerSkipped",
   Running = "EasyDotnetTestRunnerRunning",
   Debugging = "EasyDotnetTestRunnerRunning",
@@ -454,7 +472,7 @@ local status_highlights = {
   BuildFailed = "EasyDotnetTestRunnerFailed",
   NotRun = "EasyDotnetTestRunnerFailed",
   Discovering = "EasyDotnetTestRunnerRunning",
-  Queued = "EasyDotnetTestRunnerRunning",
+  Queued = "EasyDotnetTestRunnerQueued",
   Cancelling = "EasyDotnetTestRunnerRunning",
   Cancelled = "Comment",
 }
@@ -469,6 +487,7 @@ local function node_pre_icon(node_type)
     TheoryGroup = icons.package,
     TestMethod = icons.test,
     Subcase = icons.test,
+    ProbableTest = icons.test,
   })[node_type] or "?"
 end
 
@@ -476,6 +495,7 @@ local function get_status_icon(stype)
   local icons = M.options.icons
   return ({
     Failed = " " .. icons.failed,
+    Inconclusive = " " .. (icons.inconclusive or icons.skipped),
     Skipped = " " .. icons.skipped,
     Cancelled = " " .. icons.failed,
     NotRun = " " .. icons.build_failed,
@@ -490,7 +510,7 @@ local function get_status_icon(stype)
 end
 
 local function render_node(node, depth)
-  local indent = string.rep(" ", depth * 2)
+  local indent = string.rep(" ", depth + 1)
   local ntype = node.type and node.type.type or ""
   local pre = node_pre_icon(ntype)
 
@@ -512,6 +532,7 @@ local function render_node(node, depth)
       TheoryGroup = "EasyDotnetTestRunnerTest",
       TestMethod = "EasyDotnetTestRunnerTest",
       Subcase = "EasyDotnetTestRunnerSubcase",
+      ProbableTest = "EasyDotnetTestRunnerProbable",
     })[ntype]
   end
 
@@ -519,6 +540,8 @@ local function render_node(node, depth)
 end
 
 function M.refresh()
+  refresh_pending = false
+
   if not M.buf or not vim.api.nvim_buf_is_valid(M.buf) then return end
 
   local rs = state.runner_status
@@ -555,6 +578,12 @@ function M.refresh()
   for _, h in ipairs(highlights) do
     vim.hl.range(M.buf, ns_id, h.hl, { h.row, 0 }, { h.row, -1 })
   end
+end
+
+function M.schedule_refresh()
+  if refresh_pending then return end
+  refresh_pending = true
+  vim.schedule(function() M.refresh() end)
 end
 
 function M.node_at_cursor()

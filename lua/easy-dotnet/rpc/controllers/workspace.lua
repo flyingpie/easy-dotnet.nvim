@@ -5,10 +5,18 @@
 ---@field debug_attach fun(self: easy-dotnet.RPC.Client.Workspace, opts: easy-dotnet.RPC.Client.Workspace.DebugAttachOpts): easy-dotnet.RPC.CallHandle
 ---@field watch fun(self: easy-dotnet.RPC.Client.Workspace, opts: easy-dotnet.RPC.Client.Workspace.WatchOpts): easy-dotnet.RPC.CallHandle
 ---@field build fun(self: easy-dotnet.RPC.Client.Workspace, opts: easy-dotnet.RPC.Client.Workspace.BuildOpts): easy-dotnet.RPC.CallHandle
+---@field clean fun(self: easy-dotnet.RPC.Client.Workspace, opts: easy-dotnet.RPC.Client.Workspace.CleanOpts): easy-dotnet.RPC.CallHandle
 ---@field restore fun(self: easy-dotnet.RPC.Client.Workspace, opts: easy-dotnet.RPC.Client.Workspace.RestoreOpts): easy-dotnet.RPC.CallHandle
 ---@field build_solution fun(self: easy-dotnet.RPC.Client.Workspace, opts: easy-dotnet.RPC.Client.Workspace.BuildSolutionOpts): easy-dotnet.RPC.CallHandle
 ---@field test fun(self: easy-dotnet.RPC.Client.Workspace, opts: easy-dotnet.RPC.Client.Workspace.TestOpts): easy-dotnet.RPC.CallHandle
 ---@field test_solution fun(self: easy-dotnet.RPC.Client.Workspace, opts: easy-dotnet.RPC.Client.Workspace.TestOpts): easy-dotnet.RPC.CallHandle
+---@field stop fun(self: easy-dotnet.RPC.Client.Workspace, opts?: easy-dotnet.RPC.Client.Workspace.StopOpts): easy-dotnet.RPC.CallHandle
+---@field pack fun(self: easy-dotnet.RPC.Client.Workspace, opts: easy-dotnet.RPC.Client.Workspace.PackOpts): easy-dotnet.RPC.CallHandle
+---@field pack_and_push fun(self: easy-dotnet.RPC.Client.Workspace, opts: easy-dotnet.RPC.Client.Workspace.PackOpts): easy-dotnet.RPC.CallHandle
+
+---@class easy-dotnet.RPC.Client.Workspace.PackOpts
+---@field file_path string | nil
+---@field on_crash? fun(err: easy-dotnet.RPC.Error)
 
 ---@class easy-dotnet.RPC.Client.Workspace.RunOpts
 ---@field use_default boolean
@@ -27,6 +35,9 @@
 ---@class easy-dotnet.RPC.Client.Workspace.DebugAttachOpts
 ---@field on_crash? fun(err: easy-dotnet.RPC.Error)
 
+---@class easy-dotnet.RPC.Client.Workspace.StopOpts
+---@field on_crash? fun(err: easy-dotnet.RPC.Error)
+
 ---@class easy-dotnet.RPC.Client.Workspace.WatchOpts
 ---@field use_default boolean
 ---@field use_launch_profile boolean
@@ -43,6 +54,9 @@
 ---@class easy-dotnet.RPC.Client.Workspace.BuildSolutionOpts
 ---@field use_terminal boolean
 ---@field build_args string | nil
+---@field on_crash? fun(err: easy-dotnet.RPC.Error)
+
+---@class easy-dotnet.RPC.Client.Workspace.CleanOpts
 ---@field on_crash? fun(err: easy-dotnet.RPC.Error)
 
 ---@class easy-dotnet.RPC.Client.Workspace.RestoreOpts
@@ -174,6 +188,21 @@ function M:build_solution(opts)
   })()
 end
 
+---@param opts easy-dotnet.RPC.Client.Workspace.CleanOpts
+---@return easy-dotnet.RPC.CallHandle
+function M:clean(opts)
+  local helper = require("easy-dotnet.rpc.dotnet-client")
+  opts = opts or {}
+  return helper.create_rpc_call({
+    client = self._client,
+    job = nil,
+    method = "workspace/clean",
+    params = { ["_"] = "" },
+    cb = nil,
+    on_crash = opts.on_crash,
+  })()
+end
+
 ---@param opts easy-dotnet.RPC.Client.Workspace.RestoreOpts
 ---@return easy-dotnet.RPC.CallHandle
 function M:restore(opts)
@@ -236,6 +265,51 @@ function M:debug_attach(opts)
     client = self._client,
     job = nil,
     method = "workspace/debug-attach",
+    params = { ["_"] = "" },
+    cb = nil,
+    on_crash = opts.on_crash,
+  })()
+end
+
+---@param opts easy-dotnet.RPC.Client.Workspace.PackOpts
+---@return easy-dotnet.RPC.CallHandle
+function M:pack(opts)
+  local helper = require("easy-dotnet.rpc.dotnet-client")
+  opts = opts or {}
+  return helper.create_rpc_call({
+    client = self._client,
+    job = nil,
+    method = "workspace/pack",
+    params = { ["_"] = "" },
+    cb = nil,
+    on_crash = opts.on_crash,
+  })()
+end
+
+---@param opts easy-dotnet.RPC.Client.Workspace.PackOpts
+---@return easy-dotnet.RPC.CallHandle
+function M:pack_and_push(opts)
+  local helper = require("easy-dotnet.rpc.dotnet-client")
+  opts = opts or {}
+  return helper.create_rpc_call({
+    client = self._client,
+    job = nil,
+    method = "workspace/pack-and-push",
+    params = { ["_"] = "" },
+    cb = nil,
+    on_crash = opts.on_crash,
+  })()
+end
+
+---@param opts? easy-dotnet.RPC.Client.Workspace.StopOpts
+---@return easy-dotnet.RPC.CallHandle
+function M:stop(opts)
+  local helper = require("easy-dotnet.rpc.dotnet-client")
+  opts = opts or {}
+  return helper.create_rpc_call({
+    client = self._client,
+    job = nil,
+    method = "workspace/stop",
     params = { ["_"] = "" },
     cb = nil,
     on_crash = opts.on_crash,

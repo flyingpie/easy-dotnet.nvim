@@ -18,6 +18,21 @@ local function ensure_dep_installed(command, advice)
   end
 end
 
+---@param command  table<string>
+---@param advice  string | nil
+local function check_optional_dep_configured(command, advice)
+  local exec = command
+  advice = advice or ""
+  local success = pcall(function() vim.fn.system(exec) end)
+  local cmd_name = table.concat(vim.tbl_filter(function(item) return type(item) == "string" and not item:match("^%-") end, exec), " ")
+  if success and vim.v.shell_error == 0 then
+    vim.health.ok(cmd_name .. " is installed")
+  else
+    print("" .. vim.v.shell_error)
+    vim.health.warn(cmd_name .. " is not installed", { advice })
+  end
+end
+
 ---@param required boolean | nil
 local function ensure_nvim_dep_installed(pkg, advice, required)
   if required == nil then required = true end
@@ -80,7 +95,7 @@ local function check_cmp()
     if type(cmp.get_registered_sources) == "function" then
       for _, value in ipairs(cmp.get_registered_sources()) do
         if value.name == "easy-dotnet" then
-          vim.health.ok("cmp source configured correctly")
+          vim.health.warn("cmp source configured, use projx_lsp instead")
           return
         end
       end
@@ -90,12 +105,10 @@ local function check_cmp()
   if pcall(require, "blink.cmp.config") then
     local blink_config = require("blink.cmp.config")
     if blink_config.sources.providers["easy-dotnet"] then
-      vim.health.ok("cmp source configured correctly")
+      vim.health.warn("cmp source configured, use projx_lsp instead")
       return
     end
   end
-
-  vim.health.warn("cmp source not configured", { "https://github.com/GustavEikaas/easy-dotnet.nvim?tab=readme-ov-file#package-autocomplete" })
 end
 
 local function os_info()
@@ -187,7 +200,7 @@ M.check = function()
   vim.health.start("easy-dotnet CLI dependencies")
   ensure_dep_installed({ "dotnet", "-h" })
   ensure_dep_installed({ "dotnet-easydotnet", "-v" }, "dotnet tool install --global EasyDotnet  | Add path to shell https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-tool-install")
-  ensure_dep_installed({ "dotnet", "ef" }, "dotnet tool install --global dotnet-ef")
+  check_optional_dep_configured({ "dotnet", "ef" }, "dotnet tool install --global dotnet-ef")
 
   vim.health.start("easy-dotnet lua dependencies")
   ensure_nvim_dep_installed("plenary", "https://github.com/nvim-lua/plenary.nvim")

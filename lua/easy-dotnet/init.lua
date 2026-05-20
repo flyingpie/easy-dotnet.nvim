@@ -79,7 +79,10 @@ local function define_highlights()
   vim.api.nvim_set_hl(0, constants.highlights.EasyDotnetTestRunnerPackage, { link = "Include" })
   vim.api.nvim_set_hl(0, constants.highlights.EasyDotnetTestRunnerPassed, { link = "DiagnosticOk" })
   vim.api.nvim_set_hl(0, constants.highlights.EasyDotnetTestRunnerFailed, { link = "DiagnosticError" })
+  vim.api.nvim_set_hl(0, constants.highlights.EasyDotnetTestRunnerInconclusive, { link = "DiagnosticHint" })
   vim.api.nvim_set_hl(0, constants.highlights.EasyDotnetTestRunnerRunning, { link = "DiagnosticWarn" })
+  vim.api.nvim_set_hl(0, constants.highlights.EasyDotnetTestRunnerQueued, { link = "Comment" })
+  vim.api.nvim_set_hl(0, constants.highlights.EasyDotnetTestRunnerProbable, { link = "Comment" })
   --Debugger
   vim.api.nvim_set_hl(0, constants.highlights.EasyDotnetDebuggerFloatVariable, { link = "Question" })
   vim.api.nvim_set_hl(0, constants.highlights.EasyDotnetDebuggerVirtualVariable, { link = "Question" })
@@ -200,35 +203,7 @@ local function complete_command(arg_lead, cmdline)
   return matches
 end
 
-local function get_solutions_async(cb)
-  local scan = require("plenary.scandir")
-  scan.scan_dir_async(".", {
-    respect_gitignore = true,
-    search_pattern = "%.slnx?$",
-    depth = 2,
-    silent = true,
-    on_exit = function(output)
-      vim.schedule(function() wrap(cb)(output) end)
-    end,
-  })
-end
-
 local function auto_start_testrunner() require("easy-dotnet.test-runner").auto_start() end
-
-local function background_scanning(merged_opts)
-  if merged_opts.background_scanning then
-    --prewarm msbuild properties
-    local selected_solution = current_solution.try_get_selected_solution()
-    if selected_solution then
-      require("easy-dotnet.parsers.sln-parse").get_projects_from_sln_async(selected_solution)
-    else
-      get_solutions_async(function(slns)
-        if #slns ~= 1 then return end
-        require("easy-dotnet.parsers.sln-parse").get_projects_from_sln_async(slns[1])
-      end)
-    end
-  end
-end
 
 local is_installed = constants.get_data_directory() .. "/easy_dotnet_installed"
 
@@ -279,7 +254,7 @@ M.setup = function(opts)
     else
       print("Invalid subcommand:", command)
     end
-  end, { nargs = "?", complete = complete_command })
+  end, { nargs = "?", complete = complete_command, range = true })
 
   if merged_opts.csproj_mappings == true then require("easy-dotnet.csproj-mappings").attach_mappings() end
 
@@ -307,11 +282,10 @@ M.setup = function(opts)
   if merged_opts.lsp.enabled == true then
     local lsp = require("easy-dotnet.roslyn.lsp")
     lsp.enable(merged_opts.lsp)
-    if merged_opts.background_scanning then lsp.preload_roslyn(merged_opts.lsp) end
+    lsp.preload_roslyn(merged_opts.lsp)
   end
   if merged_opts.projx_lsp.enabled == true then require("easy-dotnet.projx.lsp").enable() end
   wrap(auto_register_dap)(merged_opts)
-  wrap(background_scanning)(merged_opts)
   wrap(auto_start_testrunner)()
   wrap(auto_install_easy_dotnet)()
 end
@@ -319,7 +293,7 @@ end
 M.create_new_item = wrap(function(...) require("easy-dotnet.actions.new").create_new_item(...) end)
 
 M.try_get_selected_solution = function()
-  local file = require("easy-dotnet.parsers.sln-parse").try_get_selected_solution_file()
+  local file = current_solution.try_get_selected_solution()
   return {
     basename = vim.fs.basename(file),
     path = file,
@@ -329,5 +303,19 @@ end
 M.package_completion_source = require("easy-dotnet.csproj-mappings").package_completion_cmp
 
 M.diagnostics = require("easy-dotnet.actions.diagnostics")
+
+M.lualine = {
+  jobs = function() return require("easy-dotnet.ui-modules.jobs").lualine() end,
+  active_project = function() return require("easy-dotnet.active-project").lualine() end,
+  run_status = require("easy-dotnet.running-sessions").run_status,
+  run_status_color = require("easy-dotnet.running-sessions").run_status_color,
+  run_status_click = require("easy-dotnet.running-sessions").run_status_click,
+}
+
+function M.run_default() require("easy-dotnet.rpc.rpc").global_rpc_client.workspace:run({ use_default = true, use_launch_profile = true }) end
+
+function M.debug_default() require("easy-dotnet.rpc.rpc").global_rpc_client.workspace:debug({ use_default = true, use_launch_profile = true }) end
+
+function M.stop() require("easy-dotnet.rpc.rpc").global_rpc_client.workspace:stop() end
 
 return M

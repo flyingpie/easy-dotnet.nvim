@@ -2,6 +2,89 @@
 
 This document is intended for documenting major improvements to this plugin. It can be a good idea to check this document occasionally
 
+## Project view removed ([easy-dotnet-server#399](https://github.com/GustavEikaas/easy-dotnet-server/issues/399))
+
+The project view has been removed. ProjX LSP now owns the project-file experience, so keeping a separate Lua view for package and project-reference management no longer made sense.
+
+### Breaking changes
+
+- Removed `dotnet.project_view()` and `dotnet.project_view_default()`.
+- Removed `:Dotnet project view` and `:Dotnet project view default`.
+- Removed the old persisted project-selection cache and the internal `:Dotnet _cached_files` preview command.
+- Removed the `background_scanning` option and the startup `.sln` project preload. Roslyn preload remains controlled by `lsp.preload_roslyn`.
+
+Project references can still be added from `.csproj` and `.fsproj` buffers through the existing project-file mappings, and package operations remain available through `:Dotnet add package` / `:Dotnet remove package` and ProjX LSP completion.
+
+## ProjX LSP enabled by default
+
+easy-dotnet now enables the ProjX LSP by default for `.csproj` files. Package autocomplete for `PackageReference` entries is provided through normal LSP completion, so manual completion-source setup is no longer needed.
+
+### Upgrade notes
+
+If you previously registered the `easy-dotnet` completion source manually, remove it from your completion setup:
+
+- `cmp.register_source("easy-dotnet", require("easy-dotnet").package_completion_source)`
+- `easy-dotnet` entries in `nvim-cmp` sources
+- `easy-dotnet.completion.blink` providers in `blink.cmp`
+
+## Neotest support ([#389](https://github.com/GustavEikaas/easy-dotnet.nvim/pull/389))
+
+One of the oldest feature requests ([#298](https://github.com/GustavEikaas/easy-dotnet.nvim/issues/298), raised Mar 29, 2025) has finally landed. easy-dotnet now ships with a built-in [neotest](https://github.com/nvim-neotest/neotest) adapter. It piggybacks on the existing test runner RPC server, so both VSTest and MTP adapters are supported — no separate discovery or build step is needed.
+
+To enable it, pass the adapter to your neotest setup:
+
+```lua
+require("neotest").setup({
+  adapters = {
+    require("easy-dotnet").neotest(),
+  },
+})
+```
+
+If you prefer neotest's buffer signs and keymaps, set `neotest_integration = true` to prevent the built-in test runner from overwriting them:
+
+```lua
+dotnet.setup({
+  test_runner = {
+    neotest_integration = true,
+  },
+})
+```
+
+## Multi-terminal panel ([#872](https://github.com/GustavEikaas/easy-dotnet.nvim/pull/872))
+
+The managed terminal has been replaced with a multi-tab panel. Instead of a single scratch buffer, the panel now hosts named tabs — one per running job — and you can open as many personal shell tabs as you like.
+
+### Getting a terminal
+
+```vim
+:Dotnet terminal toggle
+:Dotnet terminal show
+:Dotnet terminal hide
+```
+
+A floating tab-bar sits above the panel showing every open tab, its status icon, and the command being run.
+
+### Ownership context
+
+Tabs are either **server-owned** or **user-owned**.
+
+**Server-owned tabs** are created automatically whenever the server starts a job (`:Dotnet run`, restore, build output, etc.). Each job gets its own named slot so concurrent jobs never overwrite each other. When a server-owned job exits with code 0, the panel auto-hides after the configured delay (controlled by `managed_terminal.auto_hide` and `managed_terminal.auto_hide_delay`).
+
+**User-owned tabs** are plain `$SHELL` sessions you open yourself by pressing `+` inside the panel. They are never auto-hidden and survive across multiple server jobs.
+
+### Panel keymaps (configurable)
+
+| Key | Action |
+|-----|--------|
+| `<Tab>` | Next tab |
+| `<S-Tab>` | Previous tab |
+| `+` | New user terminal tab |
+| `X` | Close current tab |
+| `q` | Hide panel |
+
+All of these can be remapped — see the `managed_terminal.mappings` configuration below.
+
 ## External terminal window reuse ([#336](https://github.com/GustavEikaas/easy-dotnet-server/pull/336))
 When using `options.external_terminal`, running and debugging will spawn a completely separate window like Kitty or Windows Terminal. This is great and provides an easy way to see stdout from your application. Unfortunately, when your app exits, this window is orphaned. Depending on your config, one of 2 things will happen. The terminal window closes, causing you to miss crash logs if any. The window lingers, but it has lost its relationship with easy-dotnet, so when you start a new debug session a completely new window will be spawned. GustavEikaas/easy-dotnet-server#336 fixes this and ensures that terminal windows will be reused no matter which terminal emulator you use.
 
@@ -407,4 +490,3 @@ choco install nuget.commandline
 ```lua
 options.server.use_visual_studio = true
 ```
-

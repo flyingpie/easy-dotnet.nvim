@@ -28,16 +28,12 @@ end
 --- Finds solution files starting from cwd
 ---@param cb fun(solutions: string[])
 local function get_solutions_async(cb)
-  local scan = require("plenary.scandir")
-  scan.scan_dir_async(".", {
-    respect_gitignore = true,
-    search_pattern = "%.slnx?$",
+  require("easy-dotnet.fs").find_async(".", {
+    match = "%.slnx?$",
     depth = M.max_depth,
-    silent = true,
-    on_exit = function(solutions)
-      -- Normalize all paths to absolute
+    on_done = function(solutions)
       local normalized = vim.tbl_map(function(path) return vim.fs.normalize(vim.fn.fnamemodify(path, ":p")) end, solutions)
-      vim.schedule(function() cb(normalized) end)
+      cb(normalized)
     end,
   })
 end
@@ -153,6 +149,10 @@ end
 --- Returns the currently selected solution for this cwd, or nil
 ---@return string? solution_path Absolute path to the solution file
 function M.try_get_selected_solution() return try_get_solution_path() end
+
+--- Prompts user to pick a solution from available options
+---@param cb fun(solution_path: string?)
+function M.pick_solution(cb) pick_solution(cb) end
 
 --- Gets existing solution or prompts user to pick one
 ---@param cb fun(solution_path: string | nil) Callback with selected solution path or nil if cancelled

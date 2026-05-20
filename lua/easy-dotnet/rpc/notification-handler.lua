@@ -1,10 +1,11 @@
 local jobs = require("easy-dotnet.ui-modules.jobs")
 local logger = require("easy-dotnet.logger")
-local csproj_parse = require("easy-dotnet.parsers.csproj-parse")
 local constants = require("easy-dotnet.constants")
 local M = {}
 
 local active_server_finish_callbacks = {}
+
+local function handle_project_changed() end
 
 local function handle_quickfix_set(params, silent)
   require("easy-dotnet.test-runner.render").hide()
@@ -26,9 +27,6 @@ local function handle_quickfix_set(params, silent)
   })
   if not silent then vim.cmd("copen") end
 end
-
----@param client easy-dotnet.RPC.Client.Dotnet
-local function nuget_restore_handler(client, target_path) client.nuget:nuget_restore(target_path) end
 
 ---@param client easy-dotnet.RPC.Client.Dotnet
 M.handler = function(client, method, params)
@@ -58,14 +56,14 @@ M.handler = function(client, method, params)
           active_server_finish_callbacks[token] = nil
         end
       end
-    elseif method == "request/restore" then
-      logger.info("Server requested restore for " .. vim.fs.basename(params.targetPath))
-      nuget_restore_handler(client, params.targetPath)
     elseif method == "_server/update-available" then
       logger.info(string.format("easy-dotnet-server %s update available, update using `:Dotnet _server update`", params.updateType))
     elseif method == "project/changed" then
-      csproj_parse.invalidate(params.projectPath)
-      csproj_parse.get_project_from_project_file(params.projectPath)
+      handle_project_changed()
+    elseif method == "activeProject/changed" then
+      require("easy-dotnet.active-project").set(params)
+    elseif method == "runningProcesses/changed" then
+      vim.schedule(function() require("easy-dotnet.running-sessions").set(params) end)
     elseif method == "displayError" then
       logger.error(params.message)
     elseif method == "displayWarning" then
@@ -83,6 +81,8 @@ M.handler = function(client, method, params)
         vim.fn.setqflist({})
         vim.cmd("cclose")
       end
+    elseif method == "solution/projects-loaded" then
+      vim.notify("Solution loaded")
     elseif method == "registerTest" then
       local state = require("easy-dotnet.test-runner.state")
       local render = require("easy-dotnet.test-runner.render")
@@ -92,6 +92,7 @@ M.handler = function(client, method, params)
         state.register(params.test)
         if params.test.filePath then buffer.attach(params.test.filePath, client) end
         render.refresh()
+        require("easy-dotnet.neotest.events").emit("registerTest", params.test)
       end)
     elseif method == "removeTest" then
       local state = require("easy-dotnet.test-runner.state")
@@ -113,7 +114,8 @@ M.handler = function(client, method, params)
         state.update_status(params.id, params.status, params.availableActions)
         local node = state.nodes[params.id]
         if node then buffer.on_status_update(node) end
-        render.refresh()
+        render.schedule_refresh()
+        require("easy-dotnet.neotest.events").emit("updateStatus", params.id, params.status)
       end)
     elseif method == "refreshTestSigns" then
       local buffer = require("easy-dotnet.test-runner.buffer")
@@ -125,20 +127,26 @@ M.handler = function(client, method, params)
       if not params then return end
       vim.schedule(function()
         state.update_runner_status(params)
-        render.refresh()
+        render.schedule_refresh()
       end)
     elseif method == "updateStatusBatch" then
       local state = require("easy-dotnet.test-runner.state")
       local render = require("easy-dotnet.test-runner.render")
       local buffer = require("easy-dotnet.test-runner.buffer")
+      local events = require("easy-dotnet.neotest.events")
       if not params or not params.updates then return end
       vim.schedule(function()
+        local affected_files = {}
         for _, update in ipairs(params.updates) do
           state.update_status(update.id, update.status, update.availableActions)
           local node = state.nodes[update.id]
-          if node then buffer.on_status_update(node) end
+          if node and node.filePath then affected_files[node.filePath] = true end
+          events.emit("updateStatus", update.id, update.status)
         end
-        render.refresh()
+        for file in pairs(affected_files) do
+          buffer.apply_signs(file)
+        end
+        render.schedule_refresh()
       end)
     else
       vim.print("Unknown server notification " .. method)

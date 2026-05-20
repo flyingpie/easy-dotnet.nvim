@@ -147,14 +147,25 @@ function M.find_project_or_solution(bufnr, cb)
       end
     end
 
-    local project = root_finder.find_csproj_from_file(buf_path)
+    local co = coroutine.running()
+    local function await(fn)
+      local result
+      fn(function(r)
+        result = r
+        coroutine.resume(co)
+      end)
+      coroutine.yield()
+      return result
+    end
+
+    local project = await(function(done) root_finder.find_csproj_from_file(buf_path, done) end)
 
     if not project then
       cb(vim.fs.dirname(buf_path))
       return
     end
 
-    local sln = root_finder.find_solutions_from_file(project)
+    local sln = await(function(done) root_finder.find_solutions_from_file(project, done) end)
 
     if vim.tbl_isempty(sln) then
       cb(vim.fs.dirname(project))
@@ -253,6 +264,46 @@ local default_roslyn_settings = {
   },
 }
 
+---@param client vim.lsp.Client
+---@param buf integer
+local function register_file_rename_tracking(client, buf)
+  local group = vim.api.nvim_create_augroup(string.format("easy-dotnet-roslyn-rename-%d-%d", client.id, buf), { clear = true })
+
+  vim.api.nvim_create_autocmd("BufFilePre", {
+    group = group,
+    buffer = buf,
+    callback = function() vim.b[buf].easy_dotnet_old_name = vim.api.nvim_buf_get_name(buf) end,
+  })
+
+  vim.api.nvim_create_autocmd("BufFilePost", {
+    group = group,
+    buffer = buf,
+    callback = function()
+      local old_name = vim.b[buf].easy_dotnet_old_name
+      vim.b[buf].easy_dotnet_old_name = nil
+
+      local new_name = vim.api.nvim_buf_get_name(buf)
+      if not old_name or old_name == "" or new_name == "" or old_name == new_name then return end
+
+      client:notify("workspace/didRenameFiles", {
+        files = {
+          {
+            oldUri = vim.uri_from_fname(old_name),
+            newUri = vim.uri_from_fname(new_name),
+          },
+        },
+      })
+
+      client:notify("workspace/didChangeWatchedFiles", {
+        changes = {
+          { uri = vim.uri_from_fname(old_name), type = 3 },
+          { uri = vim.uri_from_fname(new_name), type = 1 },
+        },
+      })
+    end,
+  })
+end
+
 ---@param opts easy-dotnet.LspOpts
 function M.preload_roslyn(opts)
   local sln = current_solution.try_get_selected_solution()
@@ -267,6 +318,8 @@ end
 
 ---@param client vim.lsp.Client
 local function populate_source_generated_buffer(client, buf, file)
+  if not vim.api.nvim_buf_is_valid(buf) then return end
+
   local params = {
     resultId = vim.b[buf].resultId,
     textDocument = {
@@ -275,6 +328,7 @@ local function populate_source_generated_buffer(client, buf, file)
   }
 
   local function handler(err, result)
+    if not vim.api.nvim_buf_is_valid(buf) then return end
     if not result or type(result) ~= "table" then return end
     if result.resultId == vim.b[buf].resultId then return end
     assert(not err, vim.inspect(err))
@@ -383,6 +437,10 @@ function M.enable(opts)
       didChangeWatchedFiles = {
         dynamicRegistration = true,
       },
+      fileOperations = {
+        didRename = true,
+        willRename = true,
+      },
     },
   })
 
@@ -403,10 +461,11 @@ function M.enable(opts)
 
       local uri = vim.uri_from_fname(file)
       if type == "sln" then
-        M.state[client.id] = job.register_job({ name = "Opening solution", on_error_text = "Failed to open solution", on_success_text = "Workspace ready", timeout = 150000 })
+        M.state[client.id] =
+          job.register_job({ name = "[roslyn] Loading solution", on_error_text = "[roslyn] Failed to open solution", on_success_text = "[roslyn] Workspace ready", timeout = 150000 })
         client:notify("solution/open", { solution = uri })
       elseif type == "csproj" then
-        M.state[client.id] = job.register_job({ name = "Opening project", on_error_text = "Failed to open project", on_success_text = "Workspace ready", timeout = 15000 })
+        M.state[client.id] = job.register_job({ name = "[roslyn] Loading project", on_error_text = "[roslyn] Failed to open project", on_success_text = "[roslyn] Workspace ready", timeout = 15000 })
         client:notify("project/open", { projects = { uri } })
       else
         logger.warn("Unknown file selected as root_file " .. file)
@@ -434,6 +493,7 @@ function M.enable(opts)
     end,
     on_attach = function(client, buf)
       vim.b[buf].roslyn_buf_opened_at = now()
+      register_file_rename_tracking(client, buf)
       if vim.bo[buf].filetype == "cs" then
         use_roslyn_fold(buf)
         fix_indent_expression(buf)
@@ -509,8 +569,11 @@ function M.enable(opts)
       ["workspace/refreshSourceGeneratedDocument"] = function(_, _, ctx)
         local client = assert(vim.lsp.get_client_by_id(ctx.client_id))
         for _, buf in ipairs(vim.api.nvim_list_bufs()) do
-          local uri = vim.api.nvim_buf_get_name(buf)
-          if uri:match("^roslyn%-source%-generated://") then populate_source_generated_buffer(client, buf, uri) end
+          if vim.api.nvim_buf_is_loaded(buf) then
+            local ok, uri = pcall(vim.api.nvim_buf_get_name, buf)
+            if ok and uri:match("^roslyn%-source%-generated://") then populate_source_generated_buffer(client, buf, uri) end
+          end
+
         end
       end,
       -- ["razor/updateHtml"] = function() end,

@@ -1,3 +1,15 @@
+---@class easy-dotnet.ManagedTerminal.Mappings
+---@field next_tab easy-dotnet.Keymap
+---@field prev_tab easy-dotnet.Keymap
+---@field new_terminal easy-dotnet.Keymap
+---@field close_terminal easy-dotnet.Keymap
+---@field hide_panel easy-dotnet.Keymap
+
+---@class easy-dotnet.ManagedTerminal
+---@field auto_hide boolean
+---@field auto_hide_delay integer
+---@field mappings easy-dotnet.ManagedTerminal.Mappings
+
 ---@class easy-dotnet.Options
 ---@field external_terminal easy-dotnet.ExternalTerminal|nil
 ---@field test_runner easy-dotnet.TestRunner.Options
@@ -9,6 +21,7 @@
 ---@field picker easy-dotnet.PickerType
 ---@field notifications easy-dotnet.Notifications
 ---@field diagnostics easy-dotnet.DiagnosticsOptions
+---@field outdated easy-dotnet.Outdated.Options
 
 ---@class easy-dotnet.ExternalTerminal
 ---@field command string
@@ -33,6 +46,7 @@
 ---@class easy-dotnet.TestRunner.Icons
 ---@field passed string
 ---@field skipped string
+---@field inconclusive string|nil
 ---@field failed string
 ---@field success string
 ---@field reload string
@@ -69,23 +83,11 @@
 ---@field viewmode string
 ---@field vsplit_width number|nil
 ---@field vsplit_pos string|nil
+---@field neotest_integration boolean  -- when true: skips buffer signs and keymaps (neotest provides them)
 ---@field icons easy-dotnet.TestRunner.Icons
 ---@field mappings easy-dotnet.TestRunner.Mappings
 
 ---@alias easy-dotnet.PickerType nil | "telescope" | "fzf" | "snacks" | "basic"
-
-local function get_secret_path(secret_guid)
-  local path
-  local home_dir = vim.fn.expand("~")
-  if require("easy-dotnet.extensions").isWindows() then
-    local secret_path = home_dir .. "\\AppData\\Roaming\\Microsoft\\UserSecrets\\" .. secret_guid .. "\\secrets.json"
-    path = secret_path
-  else
-    local secret_path = home_dir .. "/.microsoft/usersecrets/" .. secret_guid .. "/secrets.json"
-    path = secret_path
-  end
-  return path
-end
 
 local M = {
   ---@type easy-dotnet.Options
@@ -93,16 +95,21 @@ local M = {
     managed_terminal = {
       auto_hide = true,
       auto_hide_delay = 1000,
+      mappings = {
+        next_tab = { lhs = "<Tab>", desc = "Next terminal tab" },
+        prev_tab = { lhs = "<S-Tab>", desc = "Previous terminal tab" },
+        new_terminal = { lhs = "+", desc = "New user terminal" },
+        close_terminal = { lhs = "X", desc = "Close current terminal tab" },
+        hide_panel = { lhs = "q", desc = "Hide terminal panel" },
+      },
     },
     -- Optional configuration for external terminals (matches nvim-dap structure)
     external_terminal = nil,
-    secrets = {
-      path = get_secret_path,
-    },
     ---@type easy-dotnet.TestRunner.Options
     test_runner = {
       auto_start_testrunner = true,
       hide_legend = false,
+      neotest_integration = false,
       viewmode = "float",
       vsplit_width = nil,
       vsplit_pos = nil,
@@ -165,8 +172,6 @@ local M = {
     -- if nil, will auto-detect available pickers in order: telescope -> fzf -> basic
     ---@type easy-dotnet.PickerType
     picker = nil,
-    --For performance reasons this will query msbuild properties as soon as vim starts
-    background_scanning = true,
     notifications = {
       --Set this to false if you have configured lualine to avoid double logging
       handler = function(start_event)
@@ -186,7 +191,7 @@ local M = {
       auto_register_dap = true,
     },
     projx_lsp = {
-      enabled = false,
+      enabled = true,
     },
     lsp = {
       enabled = true,
@@ -201,6 +206,12 @@ local M = {
     diagnostics = {
       default_severity = "error",
       setqflist = false,
+    },
+    outdated = {
+      mappings = {
+        upgrade = { lhs = "<leader>pu", desc = "upgrade package under cursor" },
+        upgrade_all = { lhs = "<leader>pa", desc = "upgrade all outdated packages" },
+      },
     },
   },
 }
