@@ -18,8 +18,8 @@ function M.start()
   for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
     if vim.api.nvim_buf_is_loaded(bufnr) then
       local ft = vim.bo[bufnr].filetype
-      if ft == "cs" then vim.api.nvim_exec_autocmds("FileType", {
-        buffer = bufnr,
+      if ft == "cs" or ft == "razor" then vim.api.nvim_exec_autocmds("FileType", {
+        buffer = bufnr
       }) end
     end
   end
@@ -258,6 +258,11 @@ local default_roslyn_settings = {
   ["csharp|code_lens"] = {
     dotnet_enable_tests_code_lens = false,
   },
+  razor = {
+    language_server = {
+      cohosting_enabled = true,
+    },
+  },
 }
 
 ---@param client vim.lsp.Client
@@ -392,6 +397,14 @@ function M.enable(opts)
     return
   end
   source_generated_autocmd()
+
+  vim.filetype.add({
+    extension = {
+      razor = "razor",
+      cshtml = "razor",
+    },
+  })
+
   local cmd = { "dotnet-easydotnet", "roslyn", "start" }
 
   if opts.roslynator_enabled then table.insert(cmd, "--roslynator") end
@@ -438,7 +451,7 @@ function M.enable(opts)
       --TODO: use this for when server allows changing configuration
       -- Configuration = "Release",
     },
-    filetypes = { "cs" },
+    filetypes = { "cs", "razor" },
     root_dir = M.find_project_or_solution,
     capabilities = cap,
     on_init = function(client)
@@ -500,7 +513,7 @@ function M.enable(opts)
           })
         end
       end
-      check_project_context(client, buf)
+      if vim.bo[buf].filetype == "cs" then check_project_context(client, buf) end
     end,
     commands = {
       ["roslyn.client.fixAllCodeAction"] = require("easy-dotnet.roslyn.lsp.fix_all_code_action"),
@@ -556,7 +569,6 @@ function M.enable(opts)
       end,
       ["workspace/refreshSourceGeneratedDocument"] = function(_, _, ctx)
         local client = assert(vim.lsp.get_client_by_id(ctx.client_id))
-
         for _, buf in ipairs(vim.api.nvim_list_bufs()) do
           if vim.api.nvim_buf_is_loaded(buf) then
             local ok, uri = pcall(vim.api.nvim_buf_get_name, buf)
@@ -564,6 +576,20 @@ function M.enable(opts)
           end
         end
       end,
+      -- ["razor/updateHtml"] = function() end,
+      -- ["razor/log"] = function() end,
+      -- ["textDocument/documentColor"] = function() end,
+      -- ["textDocument/colorPresentation"] = function() end,
+      -- ["textDocument/foldingRange"] = function() end,
+      -- ["textDocument/hover"] = function() end,
+      -- ["textDocument/documentHighlight"] = function() end,
+      -- ["textDocument/completion"] = function() end,
+      -- ["textDocument/reference"] = function() end,
+      -- ["textDocument/implementation"] = function() end,
+      -- ["textDocument/definition"] = function() end,
+      -- ["textDocument/signatureHelp"] = function() end,
+      -- ["textDocument/formatting"] = function() end,
+      -- ["textDocument/onTypeFormatting"] = function() end,
     },
     settings = settings,
   }
