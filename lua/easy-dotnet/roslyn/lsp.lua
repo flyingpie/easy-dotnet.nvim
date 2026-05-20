@@ -19,8 +19,8 @@ function M.start()
     if vim.api.nvim_buf_is_loaded(bufnr) then
       local ft = vim.bo[bufnr].filetype
       if ft == "cs" or ft == "razor" then vim.api.nvim_exec_autocmds("FileType", {
-		buffer = bufnr
-	  }) end
+        buffer = bufnr
+      }) end
     end
   end
 end
@@ -416,7 +416,6 @@ function M.enable(opts)
       table.insert(cmd, dll)
     end
   end
-
   local existing_config = vim.lsp.config[constants.lsp_client_name]
 
   local settings = vim.tbl_deep_extend("force", default_roslyn_settings, opts.config.settings or {}, existing_config and existing_config.settings or {})
@@ -553,7 +552,6 @@ function M.enable(opts)
       end,
       ["workspace/projectInitializationComplete"] = function(_, _, ctx, _)
         local client = vim.lsp.get_client_by_id(ctx.client_id)
-
         if not client then return end
         if M.solution_state[client.id] then M.solution_state[client.id].loaded_at = now() end
         local workspace_job = M.state[client.id]
@@ -576,7 +574,6 @@ function M.enable(opts)
             local ok, uri = pcall(vim.api.nvim_buf_get_name, buf)
             if ok and uri:match("^roslyn%-source%-generated://") then populate_source_generated_buffer(client, buf, uri) end
           end
-
         end
       end,
       -- ["razor/updateHtml"] = function() end,
